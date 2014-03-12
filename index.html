@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link rel="stylesheet" type="text/css" href="style/style.css"></script>
+    <script type="text/javascript" src="script/jquery.js"></script>
+    <script type="text/javascript" src="script/glmatrix.js"></script>
+    <script type="text/javascript" src="script/delaunay.js"></script>
+    <script type="x-shader/x-vertex" class="trgs">
+      attribute vec4 in_vertex;
+      uniform mat4 u_proj;
+      uniform mat4 u_view;
+      varying float v_intensity;
+
+      void main()
+      {
+        vec4 vertex = u_proj * u_view * vec4(in_vertex.xy, 0.0, 1.0);
+        v_intensity = in_vertex.z;
+        gl_Position = vertex;
+      }
+    </script>
+    <script type="x-shader/x-fragment" class="trgs">
+      precision mediump float;
+      uniform sampler2D u_gradient;
+      varying float v_intensity;
+
+      void main()
+      {
+        gl_FragColor = texture2D(u_gradient, vec2(v_intensity, 0.5));
+      }
+    </script>
+    <script type="x-shader/x-vertex" class="points">
+      attribute vec4 in_vertex;
+      uniform mat4 u_proj;
+      uniform mat4 u_view;
+      varying float v_selected;
+
+      void main()
+      {
+        vec4 vertex = u_proj * u_view * vec4(in_vertex.xy, 0.0, 1.0);
+        v_selected = in_vertex.w;
+        gl_PointSize = 10.0;
+        gl_Position = vertex;
+      }
+    </script>
+    <script type="x-shader/x-fragment" class="points">
+      precision mediump float;
+      varying float v_selected;
+
+      void main()
+      {
+        gl_FragColor = vec4(0.0, v_selected, 0.0, 1.0);
+      }
+    </script>
+    <script type="x-shader/x-vertex" class="lines">
+      attribute vec4 in_vertex;
+      uniform mat4 u_proj;
+      uniform mat4 u_view;
+      varying float v_selected;
+
+      void main()
+      {
+        vec4 vertex = u_proj * u_view * vec4(in_vertex.xy, 0.0, 1.0);
+        v_selected = in_vertex.w;
+        gl_Position = vertex;
+      }
+    </script>
+    <script type="x-shader/x-fragment" class="lines">
+      precision mediump float;
+      varying float v_selected;
+
+      void main()
+      {
+        gl_FragColor = vec4(0.0, v_selected, 0.0, 1.0);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="canvas" class="canvas">
+      <div class="panel">
+
+      </div>
+      <div class="points">
+
+      </div>
+      <canvas></canvas>
+    </div>
+  </body>
+</html>
