@@ -31,7 +31,7 @@ THE SOFTWARE.
  */
 
 (function() {
-  var Delaunay, PointSet, Shader;
+  var Delaunay, Edge, PointSet, Shader;
 
   Shader = (function() {
 
@@ -160,6 +160,229 @@ THE SOFTWARE.
 
   })();
 
+
+  /*
+    Quad Edge data structure
+   */
+
+  Edge = (function() {
+
+    /*
+      View over the edge array
+     */
+    var EdgeView;
+
+    EdgeView = (function() {
+
+      /*
+        Creates a new edge
+        @constructor
+       */
+      function EdgeView() {
+        this.vertex = null;
+        this.face = null;
+      }
+
+
+      /* Rotates the edge CW */
+
+      EdgeView.prototype.rot = function() {
+        return this.edge.e[(this.idx + 1) & 3];
+      };
+
+      EdgeView.prototype.invRot = function() {
+        return this.edge.e[(this.idx + 3) & 3];
+      };
+
+
+      /* Returns the symmetric edge */
+
+      EdgeView.prototype.sym = function() {
+        return this.edge.e[(this.idx + 2) & 3];
+      };
+
+
+      /* Returns the next edge */
+
+      EdgeView.prototype.oNext = function() {
+        return this.next;
+      };
+
+      EdgeView.prototype.dNext = function() {
+        return this.sym().oNext().sym();
+      };
+
+      EdgeView.prototype.lNext = function() {
+        return this.invRot().oNext().rot();
+      };
+
+      EdgeView.prototype.rNext = function() {
+        return this.rot().oNext().invRot();
+      };
+
+
+      /* Returns the previous edge */
+
+      EdgeView.prototype.oPrev = function() {
+        return this.rot().oNext().rot();
+      };
+
+      EdgeView.prototype.dPrev = function() {
+        return this.invRot().oNext().invRot();
+      };
+
+      EdgeView.prototype.lPrev = function() {
+        return this.oNext().sym();
+      };
+
+      EdgeView.prototype.rPrev = function() {
+        return this.sym().oNext();
+      };
+
+
+      /* Returns the endpoints */
+
+      EdgeView.prototype.org = function(v) {
+        if (v != null) {
+          this.vertex = v;
+        }
+        return this.vertex;
+      };
+
+      EdgeView.prototype.dest = function(v) {
+        if (v != null) {
+          this.sym().vertex = v;
+        }
+        return this.sym().vertex;
+      };
+
+
+      /* Returns the attached faces */
+
+      EdgeView.prototype.left = function(f) {
+        if (f != null) {
+          this.rot().face = f;
+        }
+        return this.rot().face;
+      };
+
+      EdgeView.prototype.right = function(f) {
+        if (f != null) {
+          this.invRot().face = f;
+        }
+        return this.invRot().face;
+      };
+
+      return EdgeView;
+
+    })();
+
+
+    /*
+      Creates a new edgee
+      @constructor
+     */
+
+    function Edge() {
+      this.e = [0, 1, 2, 3].map((function(_this) {
+        return function(i) {
+          var e;
+          e = new EdgeView();
+          e.idx = i;
+          e.id = ++Edge.id;
+          e.edge = _this;
+          return e;
+        };
+      })(this));
+      this.e[0].next = this.e[0];
+      this.e[1].next = this.e[3];
+      this.e[2].next = this.e[2];
+      this.e[3].next = this.e[1];
+    }
+
+
+    /*
+      Unique numeric id for edges
+     */
+
+    Edge.id = 0;
+
+
+    /*
+      Creates a new edge
+      @return {EdgeView}
+     */
+
+    Edge.makeEdge = function() {
+      return (new Edge()).e[0];
+    };
+
+
+    /*
+      Splices two edges
+     */
+
+    Edge.splice = function(a, b) {
+      var alpha, alphan, an, beta, betan, bn;
+      alpha = a.oNext().rot();
+      beta = b.oNext().rot();
+      an = a.oNext();
+      bn = b.oNext();
+      alphan = alpha.oNext();
+      betan = beta.oNext();
+      a.next = bn;
+      b.next = an;
+      alpha.next = betan;
+      return beta.next = alphan;
+    };
+
+
+    /*
+      Creates a new edge connecting the endpoints of
+      an existing edge
+     */
+
+    Edge.connect = function(a, b, side) {
+      var e;
+      e = Edge.makeEdge();
+      e.org(a.dest());
+      e.dest(b.org());
+      Edge.splice(e, a.lNext());
+      Edge.splice(e.sym(), b);
+      return e;
+    };
+
+
+    /*
+      Removes an edge
+     */
+
+    Edge["delete"] = function(e) {
+      Edge.splice(e, e.oPrev());
+      return Edge.splice(e.sym(), e.sym().oPrev());
+    };
+
+
+    /*
+      Swaps the diagonal of a quad
+     */
+
+    Edge.swap = function(e) {
+      var a, b;
+      a = e.oPrev();
+      b = e.sym().oPrev;
+      Edge.splice(e, a);
+      Edge.splice(e.sym(), b);
+      Edge.splice(e, a.lNext());
+      Edge.splice(e.sym(), b.lNext());
+      e.org(a.dest());
+      return e.dest(b.dest());
+    };
+
+    return Edge;
+
+  })();
+
   PointSet = (function() {
 
     /*
@@ -168,7 +391,7 @@ THE SOFTWARE.
      */
     function PointSet(gl) {
       this.gl = gl;
-      this.points = [];
+      this.pts = [];
       this.lines = [];
       this.trgs = [];
       this.data = this.gl.createBuffer();
@@ -189,27 +412,197 @@ THE SOFTWARE.
         i: Math.random(),
         selected: true
       };
-      this.points.push(point);
+      this.pts.push(point);
       this.triangulate();
-      this.genBuffer();
       return point;
     };
 
 
     /*
-      Uploads the update buffers & indices
+      Performs the Delaunay triangulation
      */
 
-    PointSet.prototype.genBuffer = function() {
-      var arr, i, point, _i, _len, _ref, _ref1;
-      arr = new Float32Array(this.points.length * 4);
-      _ref = this.points;
-      for (i = _i = 0, _len = _ref.length; _i < _len; i = ++_i) {
-        point = _ref[i];
+    PointSet.prototype.triangulate = function() {
+      var arr, ccw, compare, dfs, divide, i, inCircle, ldo, leftOf, point, rdo, rightOf, swap, visited, _i, _j, _len, _ref, _ref1, _ref2, _ref3, _results;
+      compare = (function(_this) {
+        return function(i, j) {
+          var d;
+          d = _this.pts[i].x - _this.pts[j].x;
+          if (d !== 0) {
+            return d;
+          } else {
+            return _this.pts[i].y - _this.pts[j].y;
+          }
+        };
+      })(this);
+      swap = (function(_this) {
+        return function(i, j) {
+          var tmp;
+          tmp = pts[i];
+          pts[i] = pts[j];
+          return pts[j] = tmp;
+        };
+      })(this);
+      ccw = (function(_this) {
+        return function(a, b, c) {
+          return (_this.pts[b].x - _this.pts[a].x) * (_this.pts[c].y - _this.pts[a].y) - (_this.pts[c].x - _this.pts[a].x) * (_this.pts[b].y - _this.pts[a].y) > 0;
+        };
+      })(this);
+      rightOf = (function(_this) {
+        return function(i, e) {
+          return ccw(i, e.dest(), e.org());
+        };
+      })(this);
+      leftOf = (function(_this) {
+        return function(i, e) {
+          return ccw(i, e.org(), e.dest());
+        };
+      })(this);
+      inCircle = (function(_this) {
+        return function(a, b, c, d) {
+          var a20, a21, a22, a23, b0, b1, b10, b11, b2, b3, b4, b5, b6, b7, b8, b9;
+          a20 = _this.pts[a].x * _this.pts[a].x + _this.pts[a].y * _this.pts[a].y;
+          a21 = _this.pts[b].x * _this.pts[b].x + _this.pts[b].y * _this.pts[b].y;
+          a22 = _this.pts[c].x * _this.pts[c].x + _this.pts[c].y * _this.pts[c].y;
+          a23 = _this.pts[d].x * _this.pts[d].x + _this.pts[d].y * _this.pts[d].y;
+          b0 = _this.pts[a].x * _this.pts[b].y - _this.pts[b].x * _this.pts[a].y;
+          b1 = _this.pts[a].x * _this.pts[c].y - _this.pts[c].x * _this.pts[a].y;
+          b2 = _this.pts[a].x * _this.pts[d].y - _this.pts[d].x * _this.pts[a].y;
+          b3 = _this.pts[b].x * _this.pts[c].y - _this.pts[c].x * _this.pts[b].y;
+          b4 = _this.pts[b].x * _this.pts[d].y - _this.pts[d].x * _this.pts[b].y;
+          b5 = _this.pts[c].x * _this.pts[d].y - _this.pts[d].x * _this.pts[c].y;
+          b6 = a20 - a21;
+          b7 = a20 - a22;
+          b8 = a20 - a23;
+          b9 = a21 - a22;
+          b10 = a21 - a23;
+          b11 = a22 - a23;
+          return (b0 * b11 - b1 * b10 + b2 * b9 + b3 * b8 - b4 * b7 + b5 * b6) > 0;
+        };
+      })(this);
+      divide = (function(_this) {
+        return function(arr) {
+          var a, b, c, l, ldi, ldo, r, rdi, rdo, t, vl, vr, _ref, _ref1;
+          switch (arr.length) {
+            case 2:
+              a = Edge.makeEdge();
+              a.org(arr[0]);
+              a.dest(arr[1]);
+              return [a, a.sym()];
+            case 3:
+              a = Edge.makeEdge();
+              a.org(arr[0]);
+              a.dest(arr[1]);
+              b = Edge.makeEdge();
+              b.org(arr[1]);
+              b.dest(arr[2]);
+              Edge.splice(a.sym(), b);
+              if (ccw(arr[0], arr[1], arr[2])) {
+                c = Edge.connect(b, a);
+                return [a, b.sym()];
+              } else if (ccw(arr[0], arr[2], arr[1])) {
+                c = Edge.connect(b, a);
+                return [c.sym(), c];
+              } else {
+                return [a, b.sym()];
+              }
+              break;
+            default:
+              _ref = divide(arr.slice(0, arr.length >> 1)), ldo = _ref[0], ldi = _ref[1];
+              _ref1 = divide(arr.slice(arr.length >> 1)), rdi = _ref1[0], rdo = _ref1[1];
+              while (true) {
+                if (leftOf(rdi.org(), ldi)) {
+                  ldi = ldi.lNext();
+                } else if (rightOf(ldi.org(), rdi)) {
+                  rdi = rdi.rPrev();
+                } else {
+                  break;
+                }
+              }
+              b = Edge.connect(rdi.sym(), ldi);
+              if (ldi.org() === ldo.org()) {
+                ldo = b.sym();
+              }
+              if (rdi.org() === rdo.org()) {
+                rdo = b;
+              }
+              while (true) {
+                l = b.sym().oNext();
+                if (rightOf(l.dest(), b)) {
+                  while (inCircle(b.dest(), b.org(), l.dest(), l.oNext().dest())) {
+                    t = l.oNext();
+                    Edge["delete"](l);
+                    l = t;
+                  }
+                }
+                r = b.oPrev();
+                if (rightOf(r.dest(), b)) {
+                  while (inCircle(b.dest(), b.org(), r.dest(), r.oPrev().dest())) {
+                    t = r.oPrev();
+                    Edge["delete"](r);
+                    r = t;
+                  }
+                }
+                vl = rightOf(l.dest(), b);
+                vr = rightOf(r.dest(), b);
+                if (!vl && !vr) {
+                  break;
+                }
+                if (!vl || (vr && inCircle(l.dest(), l.org(), r.org(), r.dest()))) {
+                  b = Edge.connect(r, b.sym());
+                } else {
+                  b = Edge.connect(b.sym(), l.sym());
+                }
+              }
+              return [ldo, rdo];
+          }
+        };
+      })(this);
+      this.lines = [];
+      this.trgs = [];
+      if (this.pts.length > 1) {
+        _ref1 = divide((function() {
+          _results = [];
+          for (var _i = 0, _ref = this.pts.length - 1; 0 <= _ref ? _i <= _ref : _i >= _ref; 0 <= _ref ? _i++ : _i--){ _results.push(_i); }
+          return _results;
+        }).apply(this).sort(compare)), ldo = _ref1[0], rdo = _ref1[1];
+        console.log("======");
+        visited = {};
+        dfs = (function(_this) {
+          return function(edge) {
+            if (!edge || edge.id in visited) {
+              return;
+            }
+            visited[edge.id] = true;
+            _this.lines.push(edge.org());
+            _this.lines.push(edge.dest());
+            dfs(edge.oNext());
+            dfs(edge.lNext());
+            dfs(edge.rNext());
+            dfs(edge.dNext());
+            dfs(edge.oPrev());
+            dfs(edge.lPrev());
+            dfs(edge.rPrev());
+            return dfs(edge.dPrev());
+          };
+        })(this);
+        dfs(ldo);
+        dfs(rdo);
+      }
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxLines);
+      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.lines), this.gl.STATIC_DRAW);
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxTrgs);
+      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.trgs), this.gl.STATIC_DRAW);
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
+      arr = new Float32Array(this.pts.length * 4);
+      _ref2 = this.pts;
+      for (i = _j = 0, _len = _ref2.length; _j < _len; i = ++_j) {
+        point = _ref2[i];
         arr[(i << 2) + 0] = point.x;
         arr[(i << 2) + 1] = point.y;
         arr[(i << 2) + 2] = point.i;
-        arr[(i << 2) + 3] = (_ref1 = point.selected) != null ? _ref1 : {
+        arr[(i << 2) + 3] = (_ref3 = point.selected) != null ? _ref3 : {
           1.0: 0.0
         };
       }
@@ -220,77 +613,11 @@ THE SOFTWARE.
 
 
     /*
-      Performs the Delaunay triangulation
-     */
-
-    PointSet.prototype.triangulate = function() {
-      var divide, _i, _ref, _results;
-      divide = (function(_this) {
-        return function(pts) {
-          var left, right, x, _i, _len;
-          switch (pts.length) {
-            case 0:
-              return [];
-            case 1:
-              return [pts];
-            case 2:
-              _this.lines.push(pts[0]);
-              _this.lines.push(pts[1]);
-              return [pts];
-            case 3:
-              _this.lines.push(pts[0]);
-              _this.lines.push(pts[1]);
-              _this.lines.push(pts[1]);
-              _this.lines.push(pts[2]);
-              _this.lines.push(pts[2]);
-              _this.lines.push(pts[0]);
-              _this.trgs.push(pts[0]);
-              _this.trgs.push(pts[1]);
-              _this.trgs.push(pts[2]);
-              return [pts];
-            default:
-              left = divide(pts.slice(0, (pts.length >> 1) + 1));
-              right = divide(pts.slice((pts.length >> 1) + 1, pts.length));
-              for (_i = 0, _len = right.length; _i < _len; _i++) {
-                x = right[_i];
-                left.push(x);
-              }
-              return left;
-          }
-        };
-      })(this);
-      this.lines = [];
-      this.trgs = [];
-      divide((function() {
-        _results = [];
-        for (var _i = 0, _ref = this.points.length - 1; 0 <= _ref ? _i <= _ref : _i >= _ref; 0 <= _ref ? _i++ : _i--){ _results.push(_i); }
-        return _results;
-      }).apply(this).sort((function(_this) {
-        return function(i, j) {
-          var d;
-          d = _this.points[i].x - _this.points[j].x;
-          if (d !== 0) {
-            return d;
-          } else {
-            return _this.points[i].y - _this.points[j].y;
-          }
-        };
-      })(this)));
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxLines);
-      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.lines), this.gl.STATIC_DRAW);
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxTrgs);
-      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.trgs), this.gl.STATIC_DRAW);
-      return this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
-    };
-
-
-    /*
       Returns the number of points in the set
      */
 
     PointSet.prototype.getPointCount = function() {
-      return this.points.length;
+      return this.pts.length;
     };
 
 
@@ -353,12 +680,12 @@ THE SOFTWARE.
         return function(e) {
           var point, sel, _j, _k, _len1, _len2, _ref, _ref1;
           sel = null;
-          _ref = _this.set.points;
+          _ref = _this.set.pts;
           for (_j = 0, _len1 = _ref.length; _j < _len1; _j++) {
             point = _ref[_j];
             point.selected = false;
           }
-          _ref1 = _this.set.points;
+          _ref1 = _this.set.pts;
           for (_k = 0, _len2 = _ref1.length; _k < _len2; _k++) {
             point = _ref1[_k];
             if (Math.abs(e.pageX - point.x) <= 5 && Math.abs(e.pageY - point.y) <= 5) {
@@ -369,13 +696,12 @@ THE SOFTWARE.
           }
           if (!sel) {
             sel = _this.set.addPoint(e.pageX, e.pageY);
-            _this.set.genBuffer();
+            _this.set.triangulate();
           }
-          _this.set.genBuffer();
           _this.parent.bind('mousemove', function(e) {
             sel.x = e.pageX;
             sel.y = e.pageY;
-            return _this.set.genBuffer();
+            return _this.set.triangulate();
           });
           _this.parent.bind('mouseup', function(e) {
             return _this.parent.unbind('mousemove mouseup');
@@ -395,20 +721,6 @@ THE SOFTWARE.
       proj = mat4.ortho(mat4.create(), 0, w, h, 0, -1, 1);
       view = mat4.identity(mat4.create());
       this.gl.enableVertexAttribArray(0);
-      this.shPoints.use();
-      this.shPoints.uniform("u_proj", proj);
-      this.shPoints.uniform("u_view", view);
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.set.data);
-      this.gl.vertexAttribPointer(0, 4, this.gl.FLOAT, false, 16, 0);
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
-      this.gl.drawArrays(this.gl.POINTS, 0, this.set.getPointCount());
-      this.shLines.use();
-      this.shLines.uniform("u_proj", proj);
-      this.shLines.uniform("u_view", view);
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.set.data);
-      this.gl.vertexAttribPointer(0, 4, this.gl.FLOAT, false, 16, 0);
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.set.idxLines);
-      this.gl.drawElements(this.gl.LINES, this.set.getLineCount(), this.gl.UNSIGNED_SHORT, 0);
       this.shTrgs.use();
       this.shTrgs.uniform("u_proj", proj);
       this.shTrgs.uniform("u_view", view);
@@ -419,6 +731,20 @@ THE SOFTWARE.
       this.gl.vertexAttribPointer(0, 4, this.gl.FLOAT, false, 16, 0);
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.set.idxTrgs);
       this.gl.drawElements(this.gl.TRIANGLES, this.set.getTriangleCount(), this.gl.UNSIGNED_SHORT, 0);
+      this.shLines.use();
+      this.shLines.uniform("u_proj", proj);
+      this.shLines.uniform("u_view", view);
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.set.data);
+      this.gl.vertexAttribPointer(0, 4, this.gl.FLOAT, false, 16, 0);
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.set.idxLines);
+      this.gl.drawElements(this.gl.LINES, this.set.getLineCount(), this.gl.UNSIGNED_SHORT, 0);
+      this.shPoints.use();
+      this.shPoints.uniform("u_proj", proj);
+      this.shPoints.uniform("u_view", view);
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.set.data);
+      this.gl.vertexAttribPointer(0, 4, this.gl.FLOAT, false, 16, 0);
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
+      this.gl.drawArrays(this.gl.POINTS, 0, this.set.getPointCount());
       return this.gl.disableVertexAttribArray(0);
     };
 

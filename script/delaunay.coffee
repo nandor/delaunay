@@ -121,13 +121,148 @@ class Shader
           throw new Error("Invalid uniform value, expected float")
         @gl.uniform1f @unifs[name].loc, value
 
+###
+  Quad Edge data structure
+###
+class Edge
+  ###
+    View over the edge array
+  ###
+  class EdgeView
+    ###
+      Creates a new edge
+      @constructor
+    ###
+    constructor: ->
+      @vertex = null
+      @face = null
+
+    ### Rotates the edge CW ###
+    rot: -> @edge.e[(@idx + 1) & 3]
+    invRot: -> @edge.e[(@idx + 3) & 3]
+
+    ### Returns the symmetric edge ###
+    sym: -> @edge.e[(@idx + 2) & 3]
+
+    ### Returns the next edge ###
+    oNext: -> @next
+    dNext: -> @sym().oNext().sym()
+    lNext: -> @invRot().oNext().rot()
+    rNext: -> @rot().oNext().invRot()
+
+    ### Returns the previous edge ###
+    oPrev: -> @rot().oNext().rot()
+    dPrev: -> @invRot().oNext().invRot()
+    lPrev: -> @oNext().sym()
+    rPrev: -> @sym().oNext()
+
+    ### Returns the endpoints ###
+    org: (v) ->
+      if v? then @vertex = v
+      @vertex
+
+    dest: (v) ->
+      if v? then @sym().vertex = v
+      @sym().vertex
+
+    ### Returns the attached faces ###
+    left: (f) ->
+      if f? then @rot().face = f
+      @rot().face
+
+    right: (f) ->
+      if f? then @invRot().face = f
+      @invRot().face
+
+  ###
+    Creates a new edgee
+    @constructor
+  ###
+  constructor: ->
+    @e = [0..3].map (i) =>
+      e = new EdgeView()
+      e.idx = i
+      e.id = ++Edge.id
+      e.edge = @
+      return e
+
+    @e[0].next = @e[0]
+    @e[1].next = @e[3]
+    @e[2].next = @e[2]
+    @e[3].next = @e[1]
+
+  ###
+    Unique numeric id for edges
+  ###
+  @id = 0
+
+  ###
+    Creates a new edge
+    @return {EdgeView}
+  ###
+  @makeEdge: ->
+    (new Edge()).e[0]
+
+  ###
+    Splices two edges
+  ###
+  @splice: (a, b) ->
+    alpha = a.oNext().rot()
+    beta = b.oNext().rot()
+
+    an = a.oNext()
+    bn = b.oNext()
+    alphan = alpha.oNext()
+    betan = beta.oNext()
+
+    a.next = bn
+    b.next = an
+    alpha.next = betan
+    beta.next = alphan
+
+  ###
+    Creates a new edge connecting the endpoints of
+    an existing edge
+  ###
+  @connect: (a, b, side) ->
+    e = Edge.makeEdge()
+    e.org(a.dest())
+    e.dest(b.org())
+
+    Edge.splice(e, a.lNext())
+    Edge.splice(e.sym(), b)
+
+    return e
+
+  ###
+    Removes an edge
+  ###
+  @delete: (e) ->
+    Edge.splice(e, e.oPrev())
+    Edge.splice(e.sym(), e.sym().oPrev())
+
+  ###
+    Swaps the diagonal of a quad
+  ###
+  @swap: (e) ->
+    a = e.oPrev()
+    b = e.sym().oPrev
+
+    Edge.splice(e, a)
+    Edge.splice(e.sym(), b)
+    Edge.splice(e, a.lNext())
+    Edge.splice(e.sym(), b.lNext())
+
+    e.org(a.dest())
+    e.dest(b.dest())
+
 class PointSet
   ###
     Creates a new set which will manage the points of interest
     @param {WebGLRenderingContext} gl
   ###
   constructor: (@gl) ->
-    @points = []
+    @pts = []
     @lines = []
     @trgs = []
 
@@ -145,17 +280,169 @@ class PointSet
       i: Math.random()
       selected: true
 
-    @points.push(point)
+    @pts.push(point)
     @triangulate()
-    @genBuffer()
     return point
 
   ###
-    Uploads the update buffers & indices
+    Performs the Delaunay triangulation
   ###
-  genBuffer: ->
-    arr = new Float32Array(@points.length * 4)
-    for point, i in @points
+  triangulate: ->
+    # Lexicographical order of points
+    compare = (i, j) =>
+      d = @pts[i].x - @pts[j].x
+      return if d != 0 then d else @pts[i].y - @pts[j].y
+
+    # Swaps two elements in an array
+    swap = (i, j) =>
+      tmp = pts[i]
+      pts[i] = pts[j]
+      pts[j] = tmp
+
+    # Checks the winding of 3 points
+    ccw = (a, b, c) =>
+      (@pts[b].x - @pts[a].x) * (@pts[c].y - @pts[a].y) -
+      (@pts[c].x - @pts[a].x) * (@pts[b].y - @pts[a].y) > 0
+
+    # Checks if a point is left of an edge
+    rightOf = (i, e) =>
+      ccw i, e.dest(), e.org()
+
+    # Checks if a point is right of an edge
+    leftOf = (i, e) =>
+      ccw i, e.org(), e.dest()
+
+    # Checkf if the points are inside a circle
+    inCircle = (a, b, c, d) =>
+      a20 = @pts[a].x * @pts[a].x + @pts[a].y * @pts[a].y;
+      a21 = @pts[b].x * @pts[b].x + @pts[b].y * @pts[b].y;
+      a22 = @pts[c].x * @pts[c].x + @pts[c].y * @pts[c].y;
+      a23 = @pts[d].x * @pts[d].x + @pts[d].y * @pts[d].y;
+
+      b0  = @pts[a].x * @pts[b].y - @pts[b].x * @pts[a].y
+      b1  = @pts[a].x * @pts[c].y - @pts[c].x * @pts[a].y
+      b2  = @pts[a].x * @pts[d].y - @pts[d].x * @pts[a].y
+      b3  = @pts[b].x * @pts[c].y - @pts[c].x * @pts[b].y
+      b4  = @pts[b].x * @pts[d].y - @pts[d].x * @pts[b].y
+      b5  = @pts[c].x * @pts[d].y - @pts[d].x * @pts[c].y
+      b6  = a20 - a21
+      b7  = a20 - a22
+      b8  = a20 - a23
+      b9  = a21 - a22
+      b10 = a21 - a23
+      b11 = a22 - a23
+
+      (b0 * b11 - b1 * b10 + b2 * b9 + b3 * b8 - b4 * b7 + b5 * b6) > 0
+
+    # Delaunay + quicksort
+    divide = (arr) =>
+      switch arr.length
+        when 2
+          a = Edge.makeEdge()
+          a.org(arr[0])
+          a.dest(arr[1])
+          return [a, a.sym()]
+        when 3
+          a = Edge.makeEdge()
+          a.org(arr[0])
+          a.dest(arr[1])
+
+          b = Edge.makeEdge()
+          b.org(arr[1])
+          b.dest(arr[2])
+
+          Edge.splice(a.sym(), b)
+
+          if ccw arr[0], arr[1], arr[2]
+            c = Edge.connect(b, a)
+            return [a, b.sym()]
+          else if ccw arr[0], arr[2], arr[1]
+            c = Edge.connect(b, a)
+            return [c.sym(), c]
+          else
+            return [a, b.sym()]
+        else
+          [ldo, ldi] = divide arr.slice(0, (arr.length >> 1))
+          [rdi, rdo] = divide arr.slice(arr.length >> 1)
+
+          loop
+            if leftOf rdi.org(), ldi
+              ldi = ldi.lNext()
+            else if rightOf ldi.org(), rdi
+              rdi = rdi.rPrev()
+            else
+              break
+
+          b = Edge.connect rdi.sym(), ldi
+
+          if ldi.org() == ldo.org() then ldo = b.sym()
+          if rdi.org() == rdo.org() then rdo = b
+
+          loop
+            l = b.sym().oNext()
+            if rightOf l.dest(), b
+              while inCircle b.dest(), b.org(), l.dest(), l.oNext().dest()
+                t = l.oNext()
+                Edge.delete(l)
+                l = t
+
+            r = b.oPrev()
+            if rightOf r.dest(), b
+              while inCircle b.dest(), b.org(), r.dest(), r.oPrev().dest()
+                t = r.oPrev()
+                Edge.delete(r)
+                r = t
+
+            vl = rightOf l.dest(), b
+            vr = rightOf r.dest(), b
+            if not vl and not vr
+              break
+
+            if not vl or (vr and inCircle l.dest(), l.org(), r.org(), r.dest())
+              b = Edge.connect r, b.sym()
+            else
+              b = Edge.connect b.sym(), l.sym()
+
+          return [ldo, rdo]
+
+    @lines = []
+    @trgs = []
+    if @pts.length > 1
+      [ldo, rdo] = divide [0..@pts.length - 1].sort(compare)
+
+      console.log "======"
+      visited = {}
+      dfs = (edge) =>
+        if !edge or edge.id of visited
+          return
+
+
+        visited[edge.id] = true
+        @lines.push edge.org()
+        @lines.push edge.dest()
+
+        dfs(edge.oNext())
+        dfs(edge.lNext())
+        dfs(edge.rNext())
+        dfs(edge.dNext())
+        dfs(edge.oPrev())
+        dfs(edge.lPrev())
+        dfs(edge.rPrev())
+        dfs(edge.dPrev())
+
+      dfs ldo
+      dfs rdo
+
+    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxLines
+    @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@lines), @gl.STATIC_DRAW
+    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
+
+    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxTrgs
+    @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@trgs), @gl.STATIC_DRAW
+    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
+
+    arr = new Float32Array(@pts.length * 4)
+    for point, i in @pts
       arr[(i << 2) + 0] = point.x
       arr[(i << 2) + 1] = point.y
       arr[(i << 2) + 2] = point.i
@@ -166,58 +453,10 @@ class PointSet
     @gl.bindBuffer @gl.ARRAY_BUFFER, null
 
   ###
-    Performs the Delaunay triangulation
-  ###
-  triangulate: ->
-
-    divide = (pts) =>
-      switch pts.length
-        when 0 then return []
-        when 1 then return [pts]
-        when 2
-          @lines.push(pts[0])
-          @lines.push(pts[1])
-          return [pts]
-        when 3
-          @lines.push(pts[0])
-          @lines.push(pts[1])
-          @lines.push(pts[1])
-          @lines.push(pts[2])
-          @lines.push(pts[2])
-          @lines.push(pts[0])
-          @trgs.push(pts[0])
-          @trgs.push(pts[1])
-          @trgs.push(pts[2])
-          return [pts]
-        else
-          left = divide pts.slice(0, (pts.length >> 1) + 1)
-          right = divide pts.slice((pts.length >> 1) + 1, pts.length)
-
-          left.push x for x in right
-          return left
-
-    @lines = []
-    @trgs = []
-    divide [0..@points.length - 1].sort (i, j) =>
-      d = @points[i].x - @points[j].x
-      if d != 0
-        return d
-      else
-        return @points[i].y - @points[j].y
-
-    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxLines
-    @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@lines), @gl.STATIC_DRAW
-    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
-
-    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxTrgs
-    @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@trgs), @gl.STATIC_DRAW
-    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
-
-  ###
     Returns the number of points in the set
   ###
   getPointCount: ->
-    @points.length
+    @pts.length
 
   ###
     Returns the number of triangles
@@ -289,10 +528,10 @@ class Delaunay
     # Clicking adds a new point or selects an old one
     @parent.bind 'mousedown', (e) =>
       sel = null
-      for point in @set.points
+      for point in @set.pts
         point.selected = false
 
-      for point in @set.points
+      for point in @set.pts
         if Math.abs(e.pageX - point.x) <= 5 and Math.abs(e.pageY - point.y) <= 5
           point.selected = true
           sel = point
@@ -300,13 +539,12 @@ class Delaunay
 
       unless sel
         sel = @set.addPoint e.pageX, e.pageY
-        @set.genBuffer()
+        @set.triangulate()
 
-      @set.genBuffer()
       @parent.bind 'mousemove', (e) =>
         sel.x = e.pageX
         sel.y = e.pageY
-        @set.genBuffer()
+        @set.triangulate()
       @parent.bind 'mouseup', (e) =>
         @parent.unbind 'mousemove mouseup'
 
@@ -326,24 +564,6 @@ class Delaunay
 
     @gl.enableVertexAttribArray 0
 
-    # Draw the points
-    @shPoints.use()
-    @shPoints.uniform "u_proj", proj
-    @shPoints.uniform "u_view", view
-    @gl.bindBuffer @gl.ARRAY_BUFFER, @set.data
-    @gl.vertexAttribPointer 0, 4, @gl.FLOAT, false, 16, 0
-    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
-    @gl.drawArrays @gl.POINTS, 0, @set.getPointCount()
-
-    # Draw the lines
-    @shLines.use()
-    @shLines.uniform "u_proj", proj
-    @shLines.uniform "u_view", view
-    @gl.bindBuffer @gl.ARRAY_BUFFER, @set.data
-    @gl.vertexAttribPointer 0, 4, @gl.FLOAT, false, 16, 0
-    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @set.idxLines
-    @gl.drawElements @gl.LINES, @set.getLineCount(), @gl.UNSIGNED_SHORT, 0
-
     # Draw the triangles
     @shTrgs.use()
     @shTrgs.uniform "u_proj", proj
@@ -355,6 +575,24 @@ class Delaunay
     @gl.vertexAttribPointer 0, 4, @gl.FLOAT, false, 16, 0
     @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @set.idxTrgs
     @gl.drawElements @gl.TRIANGLES, @set.getTriangleCount(), @gl.UNSIGNED_SHORT, 0
+
+    # Draw the lines
+    @shLines.use()
+    @shLines.uniform "u_proj", proj
+    @shLines.uniform "u_view", view
+    @gl.bindBuffer @gl.ARRAY_BUFFER, @set.data
+    @gl.vertexAttribPointer 0, 4, @gl.FLOAT, false, 16, 0
+    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @set.idxLines
+    @gl.drawElements @gl.LINES, @set.getLineCount(), @gl.UNSIGNED_SHORT, 0
+
+    # Draw the points
+    @shPoints.use()
+    @shPoints.uniform "u_proj", proj
+    @shPoints.uniform "u_view", view
+    @gl.bindBuffer @gl.ARRAY_BUFFER, @set.data
+    @gl.vertexAttribPointer 0, 4, @gl.FLOAT, false, 16, 0
+    @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
+    @gl.drawArrays @gl.POINTS, 0, @set.getPointCount()
 
     @gl.disableVertexAttribArray 0
 
