@@ -31,7 +31,7 @@ THE SOFTWARE.
  */
 
 (function() {
-  var Delaunay, Edge, PointSet, Shader;
+  var Delaunay, PointSet, Shader;
 
   Shader = (function() {
 
@@ -160,152 +160,152 @@ THE SOFTWARE.
 
   })();
 
+  PointSet = (function() {
+    var Edge, self;
 
-  /*
-    Quad Edge data structure
-   */
+    self = {};
 
-  Edge = (function() {
+    Edge = (function() {
 
-    /*
-      View over the edge array
-     */
-    var EdgeView;
+      /* Creates a new quad edge */
+      var EdgeView;
 
-    EdgeView = (function() {
-
-      /*
-        Creates a new edge
-        @constructor
-       */
-      function EdgeView() {
-        this.vertex = null;
-        this.face = null;
+      function Edge(set) {
+        this.set = set;
+        this.e = [0, 1, 2, 3].map((function(_this) {
+          return function(i) {
+            var e;
+            e = new EdgeView(_this.set);
+            e.idx = i;
+            e.edge = _this;
+            return e;
+          };
+        })(this));
+        this.e[0].next = this.e[0];
+        this.e[1].next = this.e[3];
+        this.e[2].next = this.e[2];
+        this.e[3].next = this.e[1];
       }
 
+      EdgeView = (function() {
 
-      /* Rotates the edge CW */
-
-      EdgeView.prototype.rot = function() {
-        return this.edge.e[(this.idx + 1) & 3];
-      };
-
-      EdgeView.prototype.invRot = function() {
-        return this.edge.e[(this.idx + 3) & 3];
-      };
-
-
-      /* Returns the symmetric edge */
-
-      EdgeView.prototype.sym = function() {
-        return this.edge.e[(this.idx + 2) & 3];
-      };
-
-
-      /* Returns the next edge */
-
-      EdgeView.prototype.oNext = function() {
-        return this.next;
-      };
-
-      EdgeView.prototype.dNext = function() {
-        return this.sym().oNext().sym();
-      };
-
-      EdgeView.prototype.lNext = function() {
-        return this.invRot().oNext().rot();
-      };
-
-      EdgeView.prototype.rNext = function() {
-        return this.rot().oNext().invRot();
-      };
-
-
-      /* Returns the previous edge */
-
-      EdgeView.prototype.oPrev = function() {
-        return this.rot().oNext().rot();
-      };
-
-      EdgeView.prototype.dPrev = function() {
-        return this.invRot().oNext().invRot();
-      };
-
-      EdgeView.prototype.lPrev = function() {
-        return this.oNext().sym();
-      };
-
-      EdgeView.prototype.rPrev = function() {
-        return this.sym().oNext();
-      };
-
-
-      /* Returns the endpoints */
-
-      EdgeView.prototype.org = function(v) {
-        if (v != null) {
-          this.vertex = v;
+        /* Creates a new edge inside the quad edge */
+        function EdgeView() {
+          this.vertex = -1;
         }
-        return this.vertex;
-      };
-
-      EdgeView.prototype.dest = function(v) {
-        if (v != null) {
-          this.sym().vertex = v;
-        }
-        return this.sym().vertex;
-      };
 
 
-      /* Returns the attached faces */
+        /* Rotates the edge CW */
 
-      EdgeView.prototype.left = function(f) {
-        if (f != null) {
-          this.rot().face = f;
-        }
-        return this.rot().face;
-      };
+        EdgeView.prototype.rot = function() {
+          return this.edge.e[(this.idx + 1) & 3];
+        };
 
-      EdgeView.prototype.right = function(f) {
-        if (f != null) {
-          this.invRot().face = f;
-        }
-        return this.invRot().face;
-      };
+        EdgeView.prototype.invRot = function() {
+          return this.edge.e[(this.idx + 3) & 3];
+        };
 
-      return EdgeView;
+
+        /* Returns the symmetric edge */
+
+        EdgeView.prototype.sym = function() {
+          return this.edge.e[(this.idx + 2) & 3];
+        };
+
+
+        /* Returns the next edge */
+
+        EdgeView.prototype.oNext = function() {
+          return this.next;
+        };
+
+        EdgeView.prototype.dNext = function() {
+          return this.sym().oNext().sym();
+        };
+
+        EdgeView.prototype.lNext = function() {
+          return this.invRot().oNext().rot();
+        };
+
+        EdgeView.prototype.rNext = function() {
+          return this.rot().oNext().invRot();
+        };
+
+
+        /* Returns the previous edge */
+
+        EdgeView.prototype.oPrev = function() {
+          return this.rot().oNext().rot();
+        };
+
+        EdgeView.prototype.dPrev = function() {
+          return this.invRot().oNext().invRot();
+        };
+
+        EdgeView.prototype.lPrev = function() {
+          return this.oNext().sym();
+        };
+
+        EdgeView.prototype.rPrev = function() {
+          return this.sym().oNext();
+        };
+
+
+        /* Returns the endpoints */
+
+        EdgeView.prototype.org = function(v) {
+          if (v != null) {
+            self.pts[v].edge = this;
+            this.vertex = v;
+          }
+          return this.vertex;
+        };
+
+        EdgeView.prototype.dest = function(v) {
+          return this.sym().org(v);
+        };
+
+
+        /* Returns the attached faces */
+
+        EdgeView.prototype.left = function(f) {
+          if (f != null) {
+            this.rot().face = f;
+          }
+          return this.rot().face;
+        };
+
+        EdgeView.prototype.right = function(f) {
+          if (f != null) {
+            this.invRot().face = f;
+          }
+          return this.invRot().face;
+        };
+
+        return EdgeView;
+
+      })();
+
+      return Edge;
 
     })();
 
 
     /*
-      Creates a new edgee
-      @constructor
+      Creates a new set which will manage the points of interest
+      @param {WebGLRenderingContext} gl
      */
 
-    function Edge() {
-      this.e = [0, 1, 2, 3].map((function(_this) {
-        return function(i) {
-          var e;
-          e = new EdgeView();
-          e.idx = i;
-          e.id = ++Edge.id;
-          e.edge = _this;
-          return e;
-        };
-      })(this));
-      this.e[0].next = this.e[0];
-      this.e[1].next = this.e[3];
-      this.e[2].next = this.e[2];
-      this.e[3].next = this.e[1];
+    function PointSet(gl) {
+      this.gl = gl;
+      self = this;
+      this.pts = [];
+      this.lines = [];
+      this.trgs = [];
+      this.data = this.gl.createBuffer();
+      this.idxLines = this.gl.createBuffer();
+      this.idxTrgs = this.gl.createBuffer();
     }
-
-
-    /*
-      Unique numeric id for edges
-     */
-
-    Edge.id = 0;
 
 
     /*
@@ -313,7 +313,7 @@ THE SOFTWARE.
       @return {EdgeView}
      */
 
-    Edge.makeEdge = function() {
+    PointSet.prototype.makeEdge = function() {
       return (new Edge()).e[0];
     };
 
@@ -322,7 +322,7 @@ THE SOFTWARE.
       Splices two edges
      */
 
-    Edge.splice = function(a, b) {
+    PointSet.prototype.splice = function(a, b) {
       var alpha, alphan, an, beta, betan, bn;
       alpha = a.oNext().rot();
       beta = b.oNext().rot();
@@ -342,13 +342,13 @@ THE SOFTWARE.
       an existing edge
      */
 
-    Edge.connect = function(a, b, side) {
+    PointSet.prototype.connect = function(a, b, side) {
       var e;
-      e = Edge.makeEdge();
+      e = this.makeEdge();
       e.org(a.dest());
       e.dest(b.org());
-      Edge.splice(e, a.lNext());
-      Edge.splice(e.sym(), b);
+      this.splice(e, a.lNext());
+      this.splice(e.sym(), b);
       return e;
     };
 
@@ -357,9 +357,9 @@ THE SOFTWARE.
       Removes an edge
      */
 
-    Edge["delete"] = function(e) {
-      Edge.splice(e, e.oPrev());
-      return Edge.splice(e.sym(), e.sym().oPrev());
+    PointSet.prototype["delete"] = function(e) {
+      this.splice(e, e.oPrev());
+      return this.splice(e.sym(), e.sym().oPrev());
     };
 
 
@@ -367,37 +367,17 @@ THE SOFTWARE.
       Swaps the diagonal of a quad
      */
 
-    Edge.swap = function(e) {
+    PointSet.prototype.swap = function(e) {
       var a, b;
       a = e.oPrev();
       b = e.sym().oPrev;
-      Edge.splice(e, a);
-      Edge.splice(e.sym(), b);
-      Edge.splice(e, a.lNext());
-      Edge.splice(e.sym(), b.lNext());
+      this.splice(e, a);
+      this.splice(e.sym(), b);
+      this.splice(e, a.lNext());
+      this.splice(e.sym(), b.lNext());
       e.org(a.dest());
       return e.dest(b.dest());
     };
-
-    return Edge;
-
-  })();
-
-  PointSet = (function() {
-
-    /*
-      Creates a new set which will manage the points of interest
-      @param {WebGLRenderingContext} gl
-     */
-    function PointSet(gl) {
-      this.gl = gl;
-      this.pts = [];
-      this.lines = [];
-      this.trgs = [];
-      this.data = this.gl.createBuffer();
-      this.idxLines = this.gl.createBuffer();
-      this.idxTrgs = this.gl.createBuffer();
-    }
 
 
     /*
@@ -410,7 +390,8 @@ THE SOFTWARE.
         x: x,
         y: y,
         i: Math.random(),
-        selected: true
+        selected: true,
+        edge: null
       };
       this.pts.push(point);
       this.triangulate();
@@ -423,7 +404,7 @@ THE SOFTWARE.
      */
 
     PointSet.prototype.triangulate = function() {
-      var arr, ccw, compare, dfs, divide, i, inCircle, ldo, leftOf, point, rdo, rightOf, swap, visited, _i, _j, _len, _ref, _ref1, _ref2, _ref3, _results;
+      var arr, ccw, compare, delaunay, edge, i, inCircle, leftOf, point, pt, rightOf, swap, _i, _j, _k, _len, _len1, _ref, _ref1, _ref2, _ref3, _results;
       compare = (function(_this) {
         return function(i, j) {
           var d;
@@ -480,36 +461,39 @@ THE SOFTWARE.
           return (b0 * b11 - b1 * b10 + b2 * b9 + b3 * b8 - b4 * b7 + b5 * b6) > 0;
         };
       })(this);
-      divide = (function(_this) {
+      delaunay = (function(_this) {
         return function(arr) {
           var a, b, c, l, ldi, ldo, r, rdi, rdo, t, vl, vr, _ref, _ref1;
           switch (arr.length) {
+            case 0:
+            case 1:
+              return [];
             case 2:
-              a = Edge.makeEdge();
+              a = _this.makeEdge();
               a.org(arr[0]);
               a.dest(arr[1]);
               return [a, a.sym()];
             case 3:
-              a = Edge.makeEdge();
+              a = _this.makeEdge();
               a.org(arr[0]);
               a.dest(arr[1]);
-              b = Edge.makeEdge();
+              b = _this.makeEdge();
               b.org(arr[1]);
               b.dest(arr[2]);
-              Edge.splice(a.sym(), b);
+              _this.splice(a.sym(), b);
               if (ccw(arr[0], arr[1], arr[2])) {
-                c = Edge.connect(b, a);
+                c = _this.connect(b, a);
                 return [a, b.sym()];
               } else if (ccw(arr[0], arr[2], arr[1])) {
-                c = Edge.connect(b, a);
+                c = _this.connect(b, a);
                 return [c.sym(), c];
               } else {
                 return [a, b.sym()];
               }
               break;
             default:
-              _ref = divide(arr.slice(0, arr.length >> 1)), ldo = _ref[0], ldi = _ref[1];
-              _ref1 = divide(arr.slice(arr.length >> 1)), rdi = _ref1[0], rdo = _ref1[1];
+              _ref = delaunay(arr.slice(0, arr.length >> 1)), ldo = _ref[0], ldi = _ref[1];
+              _ref1 = delaunay(arr.slice(arr.length >> 1)), rdi = _ref1[0], rdo = _ref1[1];
               while (true) {
                 if (leftOf(rdi.org(), ldi)) {
                   ldi = ldi.lNext();
@@ -519,7 +503,7 @@ THE SOFTWARE.
                   break;
                 }
               }
-              b = Edge.connect(rdi.sym(), ldi);
+              b = _this.connect(rdi.sym(), ldi);
               if (ldi.org() === ldo.org()) {
                 ldo = b.sym();
               }
@@ -531,7 +515,7 @@ THE SOFTWARE.
                 if (rightOf(l.dest(), b)) {
                   while (inCircle(b.dest(), b.org(), l.dest(), l.oNext().dest())) {
                     t = l.oNext();
-                    Edge["delete"](l);
+                    _this["delete"](l);
                     l = t;
                   }
                 }
@@ -539,7 +523,7 @@ THE SOFTWARE.
                 if (rightOf(r.dest(), b)) {
                   while (inCircle(b.dest(), b.org(), r.dest(), r.oPrev().dest())) {
                     t = r.oPrev();
-                    Edge["delete"](r);
+                    _this["delete"](r);
                     r = t;
                   }
                 }
@@ -549,9 +533,9 @@ THE SOFTWARE.
                   break;
                 }
                 if (!vl || (vr && inCircle(l.dest(), l.org(), r.org(), r.dest()))) {
-                  b = Edge.connect(r, b.sym());
+                  b = _this.connect(r, b.sym());
                 } else {
-                  b = Edge.connect(b.sym(), l.sym());
+                  b = _this.connect(b.sym(), l.sym());
                 }
               }
               return [ldo, rdo];
@@ -560,34 +544,33 @@ THE SOFTWARE.
       })(this);
       this.lines = [];
       this.trgs = [];
-      if (this.pts.length > 1) {
-        _ref1 = divide((function() {
-          _results = [];
-          for (var _i = 0, _ref = this.pts.length - 1; 0 <= _ref ? _i <= _ref : _i >= _ref; 0 <= _ref ? _i++ : _i--){ _results.push(_i); }
-          return _results;
-        }).apply(this).sort(compare)), ldo = _ref1[0], rdo = _ref1[1];
-        console.log("======");
-        visited = {};
-        dfs = (function(_this) {
-          return function(edge) {
-            if (!edge || edge.id in visited) {
-              return;
+      delaunay((function() {
+        _results = [];
+        for (var _i = 0, _ref = this.pts.length - 1; 0 <= _ref ? _i <= _ref : _i >= _ref; 0 <= _ref ? _i++ : _i--){ _results.push(_i); }
+        return _results;
+      }).apply(this).sort(compare));
+      _ref1 = this.pts;
+      for (_j = 0, _len = _ref1.length; _j < _len; _j++) {
+        pt = _ref1[_j];
+        if (!pt.edge) {
+          continue;
+        }
+        edge = pt.edge;
+        while (true) {
+          if (edge.org() < edge.dest()) {
+            this.lines.push(edge.org());
+            this.lines.push(edge.dest());
+            if (edge.rPrev().dest() === edge.oPrev().dest()) {
+              this.trgs.push(edge.org());
+              this.trgs.push(edge.dest());
+              this.trgs.push(edge.oPrev().dest());
             }
-            visited[edge.id] = true;
-            _this.lines.push(edge.org());
-            _this.lines.push(edge.dest());
-            dfs(edge.oNext());
-            dfs(edge.lNext());
-            dfs(edge.rNext());
-            dfs(edge.dNext());
-            dfs(edge.oPrev());
-            dfs(edge.lPrev());
-            dfs(edge.rPrev());
-            return dfs(edge.dPrev());
-          };
-        })(this);
-        dfs(ldo);
-        dfs(rdo);
+          }
+          edge = edge.oNext();
+          if (edge === pt.edge) {
+            break;
+          }
+        }
       }
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxLines);
       this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.lines), this.gl.STATIC_DRAW);
@@ -597,7 +580,7 @@ THE SOFTWARE.
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
       arr = new Float32Array(this.pts.length * 4);
       _ref2 = this.pts;
-      for (i = _j = 0, _len = _ref2.length; _j < _len; i = ++_j) {
+      for (i = _k = 0, _len1 = _ref2.length; _k < _len1; i = ++_k) {
         point = _ref2[i];
         arr[(i << 2) + 0] = point.x;
         arr[(i << 2) + 1] = point.y;
