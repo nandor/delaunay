@@ -404,7 +404,7 @@ THE SOFTWARE.
      */
 
     PointSet.prototype.triangulate = function() {
-      var arr, ccw, compare, delaunay, edge, i, inCircle, leftOf, point, pt, rightOf, swap, _i, _j, _k, _len, _len1, _ref, _ref1, _ref2, _ref3, _results;
+      var a, arr, b, c, ccw, compare, delaunay, edge, i, inCircle, leftOf, point, pt, rightOf, swap, _i, _j, _k, _len, _len1, _ref, _ref1, _ref2, _ref3, _results;
       compare = (function(_this) {
         return function(i, j) {
           var d;
@@ -557,13 +557,21 @@ THE SOFTWARE.
         }
         edge = pt.edge;
         while (true) {
-          if (edge.org() < edge.dest()) {
-            this.lines.push(edge.org());
-            this.lines.push(edge.dest());
-            if (edge.rPrev().dest() === edge.oPrev().dest()) {
-              this.trgs.push(edge.org());
-              this.trgs.push(edge.dest());
-              this.trgs.push(edge.oPrev().dest());
+          if ((a = edge.org()) < (b = edge.dest())) {
+            this.lines.push(a);
+            this.lines.push(b);
+            if ((c = edge.rPrev().dest()) === edge.rNext().org()) {
+              if (b < c) {
+                this.trgs.push(a);
+                this.trgs.push(b);
+                this.trgs.push(c);
+              } else if ((c = edge.lPrev().org()) === edge.lNext().dest()) {
+                if (b < c) {
+                  this.trgs.push(a);
+                  this.trgs.push(b);
+                  this.trgs.push(c);
+                }
+              }
             }
           }
           edge = edge.oNext();
@@ -679,8 +687,8 @@ THE SOFTWARE.
           }
           if (!sel) {
             sel = _this.set.addPoint(e.pageX, e.pageY);
-            _this.set.triangulate();
           }
+          _this.set.triangulate();
           _this.parent.bind('mousemove', function(e) {
             sel.x = e.pageX;
             sel.y = e.pageY;
