@@ -121,92 +121,93 @@ class Shader
           throw new Error("Invalid uniform value, expected float")
         @gl.uniform1f @unifs[name].loc, value
 
-###
-  Quad Edge data structure
-###
-class Edge
-  ###
-    View over the edge array
-  ###
-  class EdgeView
-    ###
-      Creates a new edge
-      @constructor
-    ###
-    constructor: ->
-      @vertex = null
-      @face = null
+class PointSet
+  self = {}
 
-    ### Rotates the edge CW ###
-    rot: -> @edge.e[(@idx + 1) & 3]
-    invRot: -> @edge.e[(@idx + 3) & 3]
+  class Edge
 
-    ### Returns the symmetric edge ###
-    sym: -> @edge.e[(@idx + 2) & 3]
+    ### Creates a new quad edge ###
+    constructor: (@set) ->
+      @e = [0..3].map (i) =>
+        e = new EdgeView(@set)
+        e.idx = i
+        e.edge = @
+        return e
 
-    ### Returns the next edge ###
-    oNext: -> @next
-    dNext: -> @sym().oNext().sym()
-    lNext: -> @invRot().oNext().rot()
-    rNext: -> @rot().oNext().invRot()
+      @e[0].next = @e[0]
+      @e[1].next = @e[3]
+      @e[2].next = @e[2]
+      @e[3].next = @e[1]
 
-    ### Returns the previous edge ###
-    oPrev: -> @rot().oNext().rot()
-    dPrev: -> @invRot().oNext().invRot()
-    lPrev: -> @oNext().sym()
-    rPrev: -> @sym().oNext()
+    class EdgeView
 
-    ### Returns the endpoints ###
-    org: (v) ->
-      if v? then @vertex = v
-      @vertex
+      ### Creates a new edge inside the quad edge ###
+      constructor: () ->
+        @vertex = -1
 
-    dest: (v) ->
-      if v? then @sym().vertex = v
-      @sym().vertex
+      ### Rotates the edge CW ###
+      rot: -> @edge.e[(@idx + 1) & 3]
+      invRot: -> @edge.e[(@idx + 3) & 3]
 
-    ### Returns the attached faces ###
-    left: (f) ->
-      if f? then @rot().face = f
-      @rot().face
+      ### Returns the symmetric edge ###
+      sym: -> @edge.e[(@idx + 2) & 3]
 
-    right: (f) ->
-      if f? then @invRot().face = f
-      @invRot().face
+      ### Returns the next edge ###
+      oNext: -> @next
+      dNext: -> @sym().oNext().sym()
+      lNext: -> @invRot().oNext().rot()
+      rNext: -> @rot().oNext().invRot()
 
-  ###
-    Creates a new edgee
-    @constructor
-  ###
-  constructor: ->
-    @e = [0..3].map (i) =>
-      e = new EdgeView()
-      e.idx = i
-      e.id = ++Edge.id
-      e.edge = @
-      return e
+      ### Returns the previous edge ###
+      oPrev: -> @rot().oNext().rot()
+      dPrev: -> @invRot().oNext().invRot()
+      lPrev: -> @oNext().sym()
+      rPrev: -> @sym().oNext()
 
-    @e[0].next = @e[0]
-    @e[1].next = @e[3]
-    @e[2].next = @e[2]
-    @e[3].next = @e[1]
+      ### Returns the endpoints ###
+      org: (v) ->
+        if v?
+          self.pts[v].edge = @
+          @vertex = v
+        @vertex
+
+      dest: (v) ->
+        @sym().org(v)
+
+      ### Returns the attached faces ###
+      left: (f) ->
+        if f? then @rot().face = f
+        @rot().face
+
+      right: (f) ->
+        if f? then @invRot().face = f
+        @invRot().face
 
   ###
-    Unique numeric id for edges
+    Creates a new set which will manage the points of interest
+    @param {WebGLRenderingContext} gl
   ###
-  @id = 0
+  constructor: (@gl) ->
+    self = @
+    @pts = []
+    @lines = []
+    @trgs = []
+
+    @data = @gl.createBuffer()
+    @idxLines = @gl.createBuffer()
+    @idxTrgs = @gl.createBuffer()
 
   ###
     Creates a new edge
     @return {EdgeView}
   ###
-  @makeEdge: ->
+  makeEdge: () ->
     (new Edge()).e[0]
 
   ###
     Splices two edges
   ###
-  @splice: (a, b) ->
+  splice: (a, b) ->
     alpha = a.oNext().rot()
     beta = b.oNext().rot()
 
@@ -224,51 +225,37 @@ class Edge
     Creates a new edge connecting the endpoints of
     an existing edge
   ###
-  @connect: (a, b, side) ->
-    e = Edge.makeEdge()
+  connect: (a, b, side) ->
+    e = @makeEdge()
     e.org(a.dest())
     e.dest(b.org())
 
-    Edge.splice(e, a.lNext())
-    Edge.splice(e.sym(), b)
+    @splice(e, a.lNext())
+    @splice(e.sym(), b)
 
     return e
 
   ###
     Removes an edge
   ###
-  @delete: (e) ->
-    Edge.splice(e, e.oPrev())
-    Edge.splice(e.sym(), e.sym().oPrev())
+  delete: (e) ->
+    @splice(e, e.oPrev())
+    @splice(e.sym(), e.sym().oPrev())
 
   ###
     Swaps the diagonal of a quad
   ###
-  @swap: (e) ->
+  swap: (e) ->
     a = e.oPrev()
     b = e.sym().oPrev
 
-    Edge.splice(e, a)
-    Edge.splice(e.sym(), b)
-    Edge.splice(e, a.lNext())
-    Edge.splice(e.sym(), b.lNext())
+    @splice(e, a)
+    @splice(e.sym(), b)
+    @splice(e, a.lNext())
+    @splice(e.sym(), b.lNext())
 
     e.org(a.dest())
     e.dest(b.dest())
-
-class PointSet
-  ###
-    Creates a new set which will manage the points of interest
-    @param {WebGLRenderingContext} gl
-  ###
-  constructor: (@gl) ->
-    @pts = []
-    @lines = []
-    @trgs = []
-
-    @data = @gl.createBuffer()
-    @idxLines = @gl.createBuffer()
-    @idxTrgs = @gl.createBuffer()
 
   ###
     Adds a new point to the existing set
@@ -279,6 +266,7 @@ class PointSet
       y: y
       i: Math.random()
       selected: true
+      edge: null
 
     @pts.push(point)
     @triangulate()
@@ -335,35 +323,36 @@ class PointSet
       (b0 * b11 - b1 * b10 + b2 * b9 + b3 * b8 - b4 * b7 + b5 * b6) > 0
 
     # Delaunay + quicksort
-    divide = (arr) =>
+    delaunay = (arr) =>
       switch arr.length
+        when 0, 1 then return []
         when 2
-          a = Edge.makeEdge()
+          a = @makeEdge()
           a.org(arr[0])
           a.dest(arr[1])
           return [a, a.sym()]
         when 3
-          a = Edge.makeEdge()
+          a = @makeEdge()
           a.org(arr[0])
           a.dest(arr[1])
 
-          b = Edge.makeEdge()
+          b = @makeEdge()
           b.org(arr[1])
           b.dest(arr[2])
 
-          Edge.splice(a.sym(), b)
+          @splice(a.sym(), b)
 
           if ccw arr[0], arr[1], arr[2]
-            c = Edge.connect(b, a)
+            c = @connect(b, a)
             return [a, b.sym()]
           else if ccw arr[0], arr[2], arr[1]
-            c = Edge.connect(b, a)
+            c = @connect(b, a)
             return [c.sym(), c]
           else
             return [a, b.sym()]
         else
-          [ldo, ldi] = divide arr.slice(0, (arr.length >> 1))
-          [rdi, rdo] = divide arr.slice(arr.length >> 1)
+          [ldo, ldi] = delaunay arr.slice(0, (arr.length >> 1))
+          [rdi, rdo] = delaunay arr.slice(arr.length >> 1)
 
           loop
             if leftOf rdi.org(), ldi
@@ -373,7 +362,7 @@ class PointSet
             else
               break
 
-          b = Edge.connect rdi.sym(), ldi
+          b = @connect rdi.sym(), ldi
 
           if ldi.org() == ldo.org() then ldo = b.sym()
           if rdi.org() == rdo.org() then rdo = b
@@ -383,14 +372,14 @@ class PointSet
             if rightOf l.dest(), b
               while inCircle b.dest(), b.org(), l.dest(), l.oNext().dest()
                 t = l.oNext()
-                Edge.delete(l)
+                @delete(l)
                 l = t
 
             r = b.oPrev()
             if rightOf r.dest(), b
               while inCircle b.dest(), b.org(), r.dest(), r.oPrev().dest()
                 t = r.oPrev()
-                Edge.delete(r)
+                @delete(r)
                 r = t
 
             vl = rightOf l.dest(), b
@@ -399,39 +388,32 @@ class PointSet
               break
 
             if not vl or (vr and inCircle l.dest(), l.org(), r.org(), r.dest())
-              b = Edge.connect r, b.sym()
+              b = @connect r, b.sym()
             else
-              b = Edge.connect b.sym(), l.sym()
+              b = @connect b.sym(), l.sym()
 
           return [ldo, rdo]
 
     @lines = []
     @trgs = []
-    if @pts.length > 1
-      [ldo, rdo] = divide [0..@pts.length - 1].sort(compare)
 
-      console.log "======"
-      visited = {}
-      dfs = (edge) =>
-        if !edge or edge.id of visited
-          return
+    delaunay [0..@pts.length - 1].sort(compare)
+    for pt in @pts
+      unless pt.edge then continue
+      edge = pt.edge
 
+      loop
+        if edge.org() < edge.dest()
+          @lines.push edge.org()
+          @lines.push edge.dest()
 
-        visited[edge.id] = true
-        @lines.push edge.org()
-        @lines.push edge.dest()
+          if edge.rPrev().dest() == edge.oPrev().dest()
+            @trgs.push edge.org()
+            @trgs.push edge.dest()
+            @trgs.push edge.oPrev().dest()
 
-        dfs(edge.oNext())
-        dfs(edge.lNext())
-        dfs(edge.rNext())
-        dfs(edge.dNext())
-        dfs(edge.oPrev())
-        dfs(edge.lPrev())
-        dfs(edge.rPrev())
-        dfs(edge.dPrev())
-
-      dfs ldo
-      dfs rdo
+        edge = edge.oNext()
+        break if edge is pt.edge
 
     @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxLines
     @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@lines), @gl.STATIC_DRAW
