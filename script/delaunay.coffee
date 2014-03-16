@@ -403,14 +403,20 @@ class PointSet
       edge = pt.edge
 
       loop
-        if edge.org() < edge.dest()
-          @lines.push edge.org()
-          @lines.push edge.dest()
+        if (a = edge.org()) < (b = edge.dest())
+          @lines.push a
+          @lines.push b
 
-          if edge.rPrev().dest() == edge.oPrev().dest()
-            @trgs.push edge.org()
-            @trgs.push edge.dest()
-            @trgs.push edge.oPrev().dest()
+          if (c = edge.rPrev().dest()) == edge.rNext().org()
+            if b < c
+              @trgs.push a
+              @trgs.push b
+              @trgs.push c
+            else if (c = edge.lPrev().org()) == edge.lNext().dest()
+              if b < c
+                @trgs.push a
+                @trgs.push b
+                @trgs.push c
 
         edge = edge.oNext()
         break if edge is pt.edge
@@ -521,8 +527,8 @@ class Delaunay
 
       unless sel
         sel = @set.addPoint e.pageX, e.pageY
-        @set.triangulate()
 
+      @set.triangulate()
       @parent.bind 'mousemove', (e) =>
         sel.x = e.pageX
         sel.y = e.pageY
