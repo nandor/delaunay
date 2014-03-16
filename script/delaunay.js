@@ -404,7 +404,7 @@ THE SOFTWARE.
      */
 
     PointSet.prototype.triangulate = function() {
-      var arr, ccw, compare, cont, delaunay, dfs, i, inCircle, leftOf, point, rightOf, start, swap, visited, _i, _j, _len, _ref, _ref1, _ref2, _results;
+      var arr, ccw, compare, cont, delaunay, dfs, formed, i, inCircle, leftOf, point, rightOf, start, swap, visited, _i, _j, _len, _ref, _ref1, _ref2, _results;
       compare = (function(_this) {
         return function(i, j) {
           var d;
@@ -545,6 +545,7 @@ THE SOFTWARE.
       this.lines = [];
       this.trgs = [];
       visited = {};
+      formed = {};
       cont = (function(_this) {
         return function(edge) {
           dfs(edge.lNext());
@@ -555,7 +556,7 @@ THE SOFTWARE.
       })(this);
       dfs = (function(_this) {
         return function(edge) {
-          var a, b, c;
+          var a, b, c, key, x, y, z, _ref;
           if (visited[edge.id]) {
             return;
           }
@@ -564,7 +565,12 @@ THE SOFTWARE.
             _this.lines.push(edge.org());
             _this.lines.push(edge.dest());
             c = edge.lNext().dest();
-            if (ccw(a, b, c)) {
+            _ref = [a, b, c].sort(function(x, y) {
+              return x - y;
+            }), x = _ref[0], y = _ref[1], z = _ref[2];
+            key = x * _this.pts.length * _this.pts.length + y * _this.pts.length + z;
+            if (!formed[key] && ccw(a, b, c)) {
+              formed[key] = true;
               _this.trgs.push(a);
               _this.trgs.push(b);
               _this.trgs.push(c);
