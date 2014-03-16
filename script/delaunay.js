@@ -586,7 +586,6 @@ THE SOFTWARE.
       }).apply(this).sort(compare)))[0])) {
         dfs(start);
       }
-      console.log(this.trgs.length, this.lines.length);
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxLines);
       this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.lines), this.gl.STATIC_DRAW);
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);

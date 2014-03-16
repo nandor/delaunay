@@ -429,8 +429,6 @@ class PointSet
     if (start = (delaunay [0..@pts.length - 1].sort(compare))[0])
       dfs start
 
-    console.log @trgs.length, @lines.length
-
     @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxLines
     @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@lines), @gl.STATIC_DRAW
     @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, null
