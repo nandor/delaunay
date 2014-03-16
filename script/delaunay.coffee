@@ -397,6 +397,8 @@ class PointSet
     @trgs = []
 
     visited = {}
+    formed = {}
+
     cont = (edge) =>
       dfs edge.lNext()
       dfs edge.rNext()
@@ -414,7 +416,10 @@ class PointSet
         @lines.push edge.dest()
 
         c = edge.lNext().dest()
-        if ccw a, b, c
+        [x, y, z] = [a, b, c].sort (x, y) -> x - y
+        key = x * @pts.length * @pts.length + y * @pts.length + z
+        if not formed[key] and ccw a, b, c
+          formed[key] = true
           @trgs.push a
           @trgs.push b
           @trgs.push c
