@@ -131,6 +131,7 @@ class PointSet
       @e = [0..3].map (i) =>
         e = new EdgeView(@set)
         e.idx = i
+        e.id = self.id++
         e.edge = @
         return e
 
@@ -166,9 +167,7 @@ class PointSet
 
       ### Returns the endpoints ###
       org: (v) ->
-        if v?
-          self.pts[v].edge = @
-          @vertex = v
+        if v? then @vertex = v
         @vertex
 
       dest: (v) ->
@@ -192,6 +191,7 @@ class PointSet
     @pts = []
     @lines = []
     @trgs = []
+    @id = 0
 
     @data = @gl.createBuffer()
     @idxLines = @gl.createBuffer()
@@ -266,7 +266,6 @@ class PointSet
       y: y
       i: Math.random()
       selected: true
-      edge: null
 
     @pts.push(point)
     @triangulate()
@@ -397,29 +396,35 @@ class PointSet
     @lines = []
     @trgs = []
 
-    delaunay [0..@pts.length - 1].sort(compare)
-    for pt in @pts
-      unless pt.edge then continue
-      edge = pt.edge
+    visited = {}
+    cont = (edge) =>
+      dfs edge.lNext()
+      dfs edge.rNext()
+      dfs edge.oNext()
+      dfs edge.dNext()
 
-      loop
-        if (a = edge.org()) < (b = edge.dest())
-          @lines.push a
-          @lines.push b
+    dfs = (edge) =>
+      if visited[edge.id]
+        return
 
-          if (c = edge.rPrev().dest()) == edge.rNext().org()
-            if b < c
-              @trgs.push a
-              @trgs.push b
-              @trgs.push c
-            else if (c = edge.lPrev().org()) == edge.lNext().dest()
-              if b < c
-                @trgs.push a
-                @trgs.push b
-                @trgs.push c
+      visited[edge.id] = true
 
-        edge = edge.oNext()
-        break if edge is pt.edge
+      if (a = edge.org()) < (b = edge.dest())
+        @lines.push edge.org()
+        @lines.push edge.dest()
+
+        c = edge.lNext().dest()
+        if ccw a, b, c
+          @trgs.push a
+          @trgs.push b
+          @trgs.push c
+
+      return cont edge
+
+    if (start = (delaunay [0..@pts.length - 1].sort(compare))[0])
+      dfs start
+
+    console.log @trgs.length, @lines.length
 
     @gl.bindBuffer @gl.ELEMENT_ARRAY_BUFFER, @idxLines
     @gl.bufferData @gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(@lines), @gl.STATIC_DRAW

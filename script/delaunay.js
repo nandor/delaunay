@@ -177,6 +177,7 @@ THE SOFTWARE.
             var e;
             e = new EdgeView(_this.set);
             e.idx = i;
+            e.id = self.id++;
             e.edge = _this;
             return e;
           };
@@ -255,7 +256,6 @@ THE SOFTWARE.
 
         EdgeView.prototype.org = function(v) {
           if (v != null) {
-            self.pts[v].edge = this;
             this.vertex = v;
           }
           return this.vertex;
@@ -302,6 +302,7 @@ THE SOFTWARE.
       this.pts = [];
       this.lines = [];
       this.trgs = [];
+      this.id = 0;
       this.data = this.gl.createBuffer();
       this.idxLines = this.gl.createBuffer();
       this.idxTrgs = this.gl.createBuffer();
@@ -390,8 +391,7 @@ THE SOFTWARE.
         x: x,
         y: y,
         i: Math.random(),
-        selected: true,
-        edge: null
+        selected: true
       };
       this.pts.push(point);
       this.triangulate();
@@ -404,7 +404,7 @@ THE SOFTWARE.
      */
 
     PointSet.prototype.triangulate = function() {
-      var a, arr, b, c, ccw, compare, delaunay, edge, i, inCircle, leftOf, point, pt, rightOf, swap, _i, _j, _k, _len, _len1, _ref, _ref1, _ref2, _ref3, _results;
+      var arr, ccw, compare, cont, delaunay, dfs, i, inCircle, leftOf, point, rightOf, start, swap, visited, _i, _j, _len, _ref, _ref1, _ref2, _results;
       compare = (function(_this) {
         return function(i, j) {
           var d;
@@ -544,42 +544,43 @@ THE SOFTWARE.
       })(this);
       this.lines = [];
       this.trgs = [];
-      delaunay((function() {
+      visited = {};
+      cont = (function(_this) {
+        return function(edge) {
+          dfs(edge.lNext());
+          dfs(edge.rNext());
+          dfs(edge.oNext());
+          return dfs(edge.dNext());
+        };
+      })(this);
+      dfs = (function(_this) {
+        return function(edge) {
+          var a, b, c;
+          if (visited[edge.id]) {
+            return;
+          }
+          visited[edge.id] = true;
+          if ((a = edge.org()) < (b = edge.dest())) {
+            _this.lines.push(edge.org());
+            _this.lines.push(edge.dest());
+            c = edge.lNext().dest();
+            if (ccw(a, b, c)) {
+              _this.trgs.push(a);
+              _this.trgs.push(b);
+              _this.trgs.push(c);
+            }
+          }
+          return cont(edge);
+        };
+      })(this);
+      if ((start = (delaunay((function() {
         _results = [];
         for (var _i = 0, _ref = this.pts.length - 1; 0 <= _ref ? _i <= _ref : _i >= _ref; 0 <= _ref ? _i++ : _i--){ _results.push(_i); }
         return _results;
-      }).apply(this).sort(compare));
-      _ref1 = this.pts;
-      for (_j = 0, _len = _ref1.length; _j < _len; _j++) {
-        pt = _ref1[_j];
-        if (!pt.edge) {
-          continue;
-        }
-        edge = pt.edge;
-        while (true) {
-          if ((a = edge.org()) < (b = edge.dest())) {
-            this.lines.push(a);
-            this.lines.push(b);
-            if ((c = edge.rPrev().dest()) === edge.rNext().org()) {
-              if (b < c) {
-                this.trgs.push(a);
-                this.trgs.push(b);
-                this.trgs.push(c);
-              } else if ((c = edge.lPrev().org()) === edge.lNext().dest()) {
-                if (b < c) {
-                  this.trgs.push(a);
-                  this.trgs.push(b);
-                  this.trgs.push(c);
-                }
-              }
-            }
-          }
-          edge = edge.oNext();
-          if (edge === pt.edge) {
-            break;
-          }
-        }
+      }).apply(this).sort(compare)))[0])) {
+        dfs(start);
       }
+      console.log(this.trgs.length, this.lines.length);
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.idxLines);
       this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.lines), this.gl.STATIC_DRAW);
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
@@ -587,13 +588,13 @@ THE SOFTWARE.
       this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.trgs), this.gl.STATIC_DRAW);
       this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
       arr = new Float32Array(this.pts.length * 4);
-      _ref2 = this.pts;
-      for (i = _k = 0, _len1 = _ref2.length; _k < _len1; i = ++_k) {
-        point = _ref2[i];
+      _ref1 = this.pts;
+      for (i = _j = 0, _len = _ref1.length; _j < _len; i = ++_j) {
+        point = _ref1[i];
         arr[(i << 2) + 0] = point.x;
         arr[(i << 2) + 1] = point.y;
         arr[(i << 2) + 2] = point.i;
-        arr[(i << 2) + 3] = (_ref3 = point.selected) != null ? _ref3 : {
+        arr[(i << 2) + 3] = (_ref2 = point.selected) != null ? _ref2 : {
           1.0: 0.0
         };
       }
